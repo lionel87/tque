@@ -1,0 +1,22 @@
+{
+  "name": "tque",
+  "version": "0.0.0",
+  "description": "Soon",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lionel87/tque.git"
+  },
+  "keywords": [
+    "transform que"
+  ],
+  "author": "László BULIK",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/lionel87/tque/issues"
+  },
+  "homepage": "https://github.com/lionel87/tque#readme"
+}

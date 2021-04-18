@@ -9,7 +9,7 @@ export class HandlerError<T extends object = any> extends Error {
         this.name = 'HandlerError';
 
         if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, HandlerError)
+            Error.captureStackTrace(this, HandlerError);
         }
     }
 }

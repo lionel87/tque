@@ -15,7 +15,7 @@ You want to transform these data with a set of functions.
 You want to control the list of called functions for each data object.
 
 1. Create a template que eg.: `const T = series(fn1, fn2, fn3)`.\
-   Here `T` is now a callable function which can have one inpuit parameter with a type of `object`, `Iterable<object>` or `AsyncIterable<object>` (incl. object streams).
+   Here `T` is now a callable function which can have one input parameter with a type of `object`, `Iterable<object>` or `AsyncIterable<object>` (incl. object streams).
 
     Alternative helpers to que up functions in a template:
     - `series()`: the functions executed in series.

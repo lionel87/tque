@@ -4,6 +4,8 @@
  * Copyright (c) 2021, László BULIK.
  * Released under the MPL-2.0 License.
  */
+import { HandlerError } from './handler-error';
+export { HandlerError };
 declare const internalsSymbol: unique symbol;
 export declare const symbols: {
     detachObject: symbol;
@@ -96,11 +98,10 @@ export declare function branch<Data extends object = any, Base extends object = 
  *
  * - If any handler returns `false`, the que terminates without result; no other rule apply below.
  * - If any handler returns `true`, the que stops and returns the data, including
- *   all modifications of this step (other handler result will be merged).
- * - If any handler returns array, the first element will be used, the rest is dropped.
- * - `.rebase()` calls have unpredictable results; do not use.
- * - `.doNotMerge()` calls have unpredictable results; do not use.
- * - `branch()` function have unpredictable results; do not use.
+ *   all modifications of this step (other handler results will be merged).
+ * - If any handler returns array, the first element will be used, the rest is dropped, to avoid too much complexity.
+ * - `.rebase(data)` calls have unpredictable results; do not use.
+ * - `.detached(data)` calls have unpredictable results; do not use.
+ * - `branch(handlers)` function have unpredictable results; do not use.
   */
 export declare function parallel<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
-export {};

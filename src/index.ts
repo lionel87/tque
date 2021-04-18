@@ -8,6 +8,9 @@
 import assign from 'assign-deep';
 import clone from 'clone-deep';
 
+import { HandlerError } from './handler-error';
+export { HandlerError };
+
 const detachObjectSymbol = Symbol('__detachObjectMode');
 const internalsSymbol = Symbol('__internals');
 
@@ -34,9 +37,9 @@ type BranchApi<Base, Data> = {
 
 export type Api<Base, Data> = {
     [internalsSymbol]: BranchApi<Base, Data>;
-    series: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> }};
-    parallel: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> }};
-    branch: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> }};
+    series: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> } };
+    parallel: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> } };
+    branch: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> } };
     next(...args: (Handler<Api<Base, Data>, Data> | Handler<Api<Base, Data>, Data>[])[]): Api<Base, Data>;
     push(...args: (Handler<Api<Base, Data>, Data> | Handler<Api<Base, Data>, Data>[])[]): Api<Base, Data>;
     rebase(data: Data): void;
@@ -47,6 +50,9 @@ const isIterable = <T>(arg: any): arg is Iterable<T> => arg && typeof arg[Symbol
 const isAsyncIterable = <T>(arg: any): arg is AsyncIterable<T> => arg && typeof arg[Symbol.asyncIterator] === 'function';
 const isApi = <T, D>(arg: any): arg is Api<T, D> => arg && typeof arg[internalsSymbol] === 'object';
 const isHandler = <T, D>(arg: any): arg is Handler<T, D> => typeof arg === 'function';
+const isObject = (arg: unknown): arg is object => !!arg && typeof arg === 'object';
+
+const getType = (arg: unknown): string => typeof arg === 'object' ? (arg ? 'object' : 'null') : (typeof arg);
 
 function flattenHandlers<ThisArg, Data>(args: HandlerArg<ThisArg, Data>[]) {
     const result: Handler<ThisArg, Data>[] = [];
@@ -112,7 +118,14 @@ export function createInterface<Data extends object = any, Base extends object =
         let terminateWithoutResult = false;
 
         while (self.que.length > 0) {
-            let results = await (<Handler<Api<Base, Data>, Data>>self.que.shift()).call(self.api, self.data);
+            const handler = <Handler<Api<Base, Data>, Data>>self.que.shift(); // que always have items here, so no undefined results.
+
+            let results: HandlerResult<Data>;
+            try {
+                results = await handler.call(self.api, self.data);
+            } catch (error) {
+                throw new HandlerError(error, self.data, handler);
+            }
 
             if (!Array.isArray(results)) {
                 results = [results];
@@ -190,9 +203,8 @@ export function create<Data extends object = any>(
         const results: Data[] = [];
         const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
         for await (const d of forAwaitOfIterableData) {
-            if (!d || typeof d !== 'object') {
-                const recievedType = typeof d !== 'object' ? typeof d : 'null';
-                throw new Error(`Only object inputs are allowed, got '${recievedType}'.`);
+            if (!isObject(d)) {
+                throw new Error(`Only object inputs are allowed, got '${getType(d)}'.`);
             }
             const que = createInterface(clone(d), [handler]);
             const queResults = await que.consume();
@@ -229,9 +241,8 @@ export function createWithContext<Data extends object = any, Base extends object
         const results: Data[] = [];
         const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
         for await (const d of forAwaitOfIterableData) {
-            if (!d || typeof d !== 'object') {
-                const recievedType = typeof d !== 'object' ? typeof d : 'null';
-                throw new Error(`Only object inputs are allowed, got '${recievedType}'.`);
+            if (!isObject(d)) {
+                throw new Error(`Only object inputs are allowed, got '${getType(d)}'.`);
             }
             const que = createInterface(clone(d), [handler], thisArg);
             const queResults = await que.consume();
@@ -262,9 +273,8 @@ export function series<Data extends object = any, Base extends object = {}>(
             const results: Data[] = [];
             const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data]; // incl. array with promises
             for await (const d of forAwaitOfIterableData) {
-                if (!d || typeof d !== 'object') {
-                    const recievedType = typeof d !== 'object' ? typeof d : 'null';
-                    throw new Error(`Only object inputs are allowed, got '${recievedType}'.`);
+                if (!isObject(d)) {
+                    throw new Error(`Only object inputs are allowed, got '${getType(d)}'.`);
                 }
                 const que = createInterface(clone(d), [...handlers]);
                 const queResults = await que.consume();
@@ -300,9 +310,8 @@ export function branch<Data extends object = any, Base extends object = {}>(
             const results: Data[] = [];
             const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
             for await (const d of forAwaitOfIterableData) {
-                if (!d || typeof d !== 'object') {
-                    const recievedType = typeof d !== 'object' ? typeof d : 'null';
-                    throw new Error(`Only object inputs are allowed, got '${recievedType}'.`);
+                if (!isObject(d)) {
+                    throw new Error(`Only object inputs are allowed, got '${getType(d)}'.`);
                 }
                 for (const handler of handlers) {
                     const que = createInterface(clone(d), [handler]);
@@ -324,11 +333,11 @@ export function branch<Data extends object = any, Base extends object = {}>(
  *
  * - If any handler returns `false`, the que terminates without result; no other rule apply below.
  * - If any handler returns `true`, the que stops and returns the data, including
- *   all modifications of this step (other handler result will be merged).
- * - If any handler returns array, the first element will be used, the rest is dropped.
- * - `.rebase()` calls have unpredictable results; do not use.
- * - `.doNotMerge()` calls have unpredictable results; do not use.
- * - `branch()` function have unpredictable results; do not use.
+ *   all modifications of this step (other handler results will be merged).
+ * - If any handler returns array, the first element will be used, the rest is dropped, to avoid too much complexity.
+ * - `.rebase(data)` calls have unpredictable results; do not use.
+ * - `.detached(data)` calls have unpredictable results; do not use.
+ * - `branch(handlers)` function have unpredictable results; do not use.
   */
 export function parallel<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]
@@ -342,7 +351,12 @@ export function parallel<Data extends object = any, Base extends object = {}>(
             const api = this;
             const internals = api[internalsSymbol];
 
-            const handlerResults = await Promise.all(handlers.map(handler => handler.call(api, internals.data)));
+            let handlerResults: HandlerResult<Data>[];
+            try {
+                handlerResults = await Promise.all(handlers.map(handler => handler.call(api, internals.data)));
+            } catch (error) { 
+                throw new HandlerError(error, internals.data);
+            }
 
             if (handlerResults.some(r => r === false || (Array.isArray(r) && r.some(r => r === false)))) { // if the que exits, prevent heavy work early
                 return false;
@@ -374,14 +388,18 @@ export function parallel<Data extends object = any, Base extends object = {}>(
             const results: Data[] = [];
             const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
             for await (const d of forAwaitOfIterableData) {
-                if (!d || typeof d !== 'object') {
-                    const recievedType = typeof d !== 'object' ? typeof d : 'null';
-                    throw new Error(`Only object inputs are allowed, got '${recievedType}'.`);
+                if (!isObject(d)) {
+                    throw new Error(`Only object inputs are allowed, got '${getType(d)}'.`);
                 }
 
                 const internals = createInterface<Data, Base>(clone(d), []);
 
-                const handlerResults = await Promise.all(handlers.map(handler => handler.call(internals.api, internals.data)));
+                let handlerResults: HandlerResult<Data>[];
+                try {
+                    handlerResults = await Promise.all(handlers.map(handler => handler.call(internals.api, internals.data)));
+                } catch (error) { 
+                    throw new HandlerError(error, internals.data);
+                }
 
                 if (handlerResults.some(r => r === false || (Array.isArray(r) && r.some(r => r === false)))) { // if the que exits, prevent heavy work early
                     break;

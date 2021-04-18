@@ -3,17 +3,17 @@ import commonjs from '@rollup/plugin-commonjs';
 import resolve from '@rollup/plugin-node-resolve';
 
 export default {
-	input: 'src/index.ts',
+    input: 'src/index.ts',
     output: {
         file: 'lib/index.js',
-		format: 'cjs',
-		sourcemap: true,
+        format: 'cjs',
+        sourcemap: false,
     },
-	plugins: [
+    plugins: [
         resolve(),
-		commonjs(),
-		typescript(),
-	],
+        commonjs(),
+        typescript({ sourceMap: false }),
+    ],
     watch: {
         include: [
             'src',

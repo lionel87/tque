@@ -1,4 +1,4 @@
-const { series, parallel, branch } = require('../lib/index');
+const { series, parallel, branch, HandlerError } = require('../lib/index');
 
 test('series() base functionality', async () => {
     const f = series(
@@ -89,4 +89,14 @@ test('series(), parallel(), branch(), should throw error when params are incorre
     expect(() => f(null)).rejects.toThrow(Error);
     expect(() => g(1)).rejects.toThrow(Error);
     expect(() => h("hello")).rejects.toThrow(Error);
+});
+
+test('series(), parallel(), branch(), should throw error HandlerError when handlers throws', async () => {
+    const f = series(() => { throw new Error('something'); });
+    const g = parallel(() => { throw new Error('something'); });
+    const h = branch(() => { throw new Error('something'); });
+
+    expect(() => f({})).rejects.toThrow(HandlerError);
+    expect(() => g({})).rejects.toThrow(HandlerError);
+    expect(() => h({})).rejects.toThrow(HandlerError);
 });

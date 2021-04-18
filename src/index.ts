@@ -7,6 +7,7 @@
 
 import assign from 'assign-deep';
 import clone from 'clone-deep';
+import { HandlerError } from './handler-error';
 
 const detachObjectSymbol = Symbol('__detachObjectMode');
 const internalsSymbol = Symbol('__internals');
@@ -34,9 +35,9 @@ type BranchApi<Base, Data> = {
 
 export type Api<Base, Data> = {
     [internalsSymbol]: BranchApi<Base, Data>;
-    series: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> }};
-    parallel: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> }};
-    branch: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> }};
+    series: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> } };
+    parallel: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> } };
+    branch: { <Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): { (this: Api<Base, Data>, data: DataArg<Data>): Promise<Data[]> } };
     next(...args: (Handler<Api<Base, Data>, Data> | Handler<Api<Base, Data>, Data>[])[]): Api<Base, Data>;
     push(...args: (Handler<Api<Base, Data>, Data> | Handler<Api<Base, Data>, Data>[])[]): Api<Base, Data>;
     rebase(data: Data): void;
@@ -112,7 +113,14 @@ export function createInterface<Data extends object = any, Base extends object =
         let terminateWithoutResult = false;
 
         while (self.que.length > 0) {
-            let results = await (<Handler<Api<Base, Data>, Data>>self.que.shift()).call(self.api, self.data);
+            const handler = <Handler<Api<Base, Data>, Data>>self.que.shift();
+
+            let results: HandlerResult<Data>;
+            try {
+                results = await handler.call(self.api, self.data);
+            } catch (error) {
+                throw new HandlerError(self.data, handler, error?.message ?? error);
+            }
 
             if (!Array.isArray(results)) {
                 results = [results];

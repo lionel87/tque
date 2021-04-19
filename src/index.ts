@@ -286,9 +286,7 @@ export function series<Data extends object = any, Base extends object = {}>(
 }
 
 /**
- * Splits data into multiple queues.
- *
- * For each input function, the que is cloned, the function is prepended.
+ * Creates multiple branches from the data objects, each branch starting with one of the input function prepended.
  */
 export function branch<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]

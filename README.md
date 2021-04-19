@@ -14,17 +14,21 @@ You have a bunch of data in multiple JS objects.
 You want to transform these data with a set of functions.
 You want to control the list of called functions for each data object.
 
-1. Create a template que eg.: `const T = series(fn1, fn2, fn3)`.\
-   Here `T` is now a callable function which can have one input parameter with a type of `object`, `Iterable<object>` or `AsyncIterable<object>` (incl. object streams).
+1. Create a template que eg.: `const T = series(fn1, fn2, fn3)`.
 
-    Alternative helpers to que up functions in a template:
-    - `series()`: the functions executed in series.
-    - `parallel()`: the functions executed simultaneously.
-    - `branch()`: creates multiple branches; each branch starting with one of the input functions.
+   Here `T` is now a callable function which can have one input parameter (the input data) with a type of `object`, `Iterable<object>` or `AsyncIterable<object>` (incl. object streams).
 
-2. Start the transformations by calling the `T(data)` template. This ques up all the functions defined in the template to be executed on the data.
+   *`series()` will call the transform functions in series; but there are also a `parallel()` helper where functions executed simultaneously and a `branch()` helper which creates multiple branches, each branch starting with one of its input function.*
 
-3. These functions can que up other functions conditionally while they are running. This means each data object can have their own path of transformations based on their contents.
+2. Start the transformations by calling the `T(data)` template.
+
+   This ques up all the functions defined in the template to be executed on the data.
+   These transform functions can:
+   - que up other functions conditionally while they are running.
+   - multiply the data objects by returning arrays.
+   - each data object will have its separate que of transforms.
+
+   This means each data object can have their own unique path of transformations based on their contents.
 
 ## Example
 This example showcases some key features of the package.\

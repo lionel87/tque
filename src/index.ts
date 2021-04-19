@@ -327,18 +327,15 @@ export function branch<Data extends object = any, Base extends object = {}>(
 /**
  * Executes all handlers simultaneously on the data.
  * The goal here is to speed up tasks that can work well asynchronously, like database or HTTP requests.
- *
- * Each handler works at the same time on the same dataset, so:\
+ * 
  * __Use with caution!__
+ * 
+ * Handlers are started parallel but their results are processed in series
+ * (the same way as `series()` would do).
  *
- * - If any handler returns `false`, the que terminates without result; no other rule apply below.
- * - If any handler returns `true`, the que stops and returns the data, including
- *   all modifications of this step (other handler results will be merged).
- * - If any handler returns array, the first element will be used, the rest is dropped, to avoid too much complexity.
- * - `.rebase(data)` calls have unpredictable results; do not use.
- * - `.detached(data)` calls have unpredictable results; do not use.
- * - `branch(handlers)` function have unpredictable results; do not use.
-  */
+ * Avoid `.rebase(data)` calls in a parallel handler; it could have unpredictable
+ * results if more than one handler tries to rebase.
+ */
 export function parallel<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]
 ): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
@@ -351,39 +348,15 @@ export function parallel<Data extends object = any, Base extends object = {}>(
             const api = this;
             const internals = api[internalsSymbol];
 
-            let handlerResults: HandlerResult<Data>[];
+            let handlerResults: Handler<Api<Base, Data>, Data>[];
             try {
-                handlerResults = await Promise.all(handlers.map(handler => handler.call(api, internals.data)));
+                handlerResults = handlers
+                    .map(handler => () => (async () => await handler.call(api, internals.data))());
             } catch (error) { 
                 throw new HandlerError(error, internals.data);
             }
 
-            if (handlerResults.some(r => r === false || (Array.isArray(r) && r.some(r => r === false)))) { // if the que exits, prevent heavy work early
-                return false;
-            }
-
-            let endThisQue = false;
-            for (let handlerResult of handlerResults) {
-                if (!Array.isArray(handlerResult)) {
-                    handlerResult = [handlerResult];
-                }
-                const handerResult0 = await handlerResult.shift();
-                if (handerResult0 !== true) {
-                    if (handerResult0 && typeof handerResult0 === 'object') { // object
-                        if ((<any>handerResult0)[detachObjectSymbol]) { // do not merge
-                            internals.data = handerResult0;
-                        } else { // please merge
-                            assign(internals.data, handerResult0);
-                        }
-                    }
-                } else {
-                    endThisQue = true;
-                }
-            }
-
-            if (endThisQue) {
-                return true;
-            }
+            this.next(handlerResults);
         } else {
             const results: Data[] = [];
             const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
@@ -393,43 +366,20 @@ export function parallel<Data extends object = any, Base extends object = {}>(
                 }
 
                 const internals = createInterface<Data, Base>(clone(d), []);
+                const api = internals.api;
 
-                let handlerResults: HandlerResult<Data>[];
+                let handlerResults: Handler<Api<Base, Data>, Data>[];
                 try {
-                    handlerResults = await Promise.all(handlers.map(handler => handler.call(internals.api, internals.data)));
+                    handlerResults = handlers
+                        .map(handler => () => (async () => await handler.call(api, internals.data))());
                 } catch (error) { 
-                    throw new HandlerError(error, internals.data);
+                    throw new HandlerError(error, d);
                 }
+                
+                api.next(handlerResults);
 
-                if (handlerResults.some(r => r === false || (Array.isArray(r) && r.some(r => r === false)))) { // if the que exits, prevent heavy work early
-                    break;
-                }
-
-                let endThisQue = false;
-                for (let handlerResult of handlerResults) {
-                    if (!Array.isArray(handlerResult)) {
-                        handlerResult = [handlerResult];
-                    }
-                    const handerResult0 = await handlerResult.shift();
-                    if (handerResult0 !== true) {
-                        if (handerResult0 && typeof handerResult0 === 'object') { // object
-                            if ((<any>handerResult0)[detachObjectSymbol]) { // do not merge
-                                internals.data = handerResult0;
-                            } else { // please merge
-                                assign(internals.data, handerResult0);
-                            }
-                        }
-                    } else {
-                        endThisQue = true;
-                    }
-                }
-
-                if (endThisQue) {
-                    results.push(internals.data);
-                } else {
-                    const queResults = await internals.consume();
-                    Array.prototype.push.apply(results, queResults);
-                }
+                const queResults = await internals.consume();
+                Array.prototype.push.apply(results, queResults);
             }
             return results;
         }

@@ -11,11 +11,11 @@ import clone from 'clone-deep';
 import { HandlerError } from './handler-error';
 export { HandlerError };
 
-const detachObjectSymbol = Symbol('__detachObjectMode');
+const detachedObjectSymbol = Symbol('__detachedObjectMode');
 const internalsSymbol = Symbol('__internals');
 
 export const symbols = {
-    detachObject: detachObjectSymbol,
+    detachedObject: detachedObjectSymbol,
     internals: internalsSymbol,
 };
 
@@ -100,7 +100,7 @@ export function createInterface<Data extends object = any, Base extends object =
             self.data = data;
         },
         detached(data: Data): Data {
-            (<any>data)[detachObjectSymbol] = true;
+            (<any>data)[detachedObjectSymbol] = true;
             return data;
         }
     }, <Base>(base || {}));
@@ -139,8 +139,8 @@ export function createInterface<Data extends object = any, Base extends object =
                     if (result !== false) { // if not exiting
                         if (result !== true) {
                             if (result && typeof result === 'object') { // object
-                                if ((<any>result)[detachObjectSymbol]) { // do not merge
-                                    delete (<any>result)[detachObjectSymbol];
+                                if ((<any>result)[detachedObjectSymbol]) { // do not merge
+                                    delete (<any>result)[detachedObjectSymbol];
                                     self.branch(result);
                                 } else { // please merge
                                     self.branch(assign(clone(self.data), result));
@@ -158,8 +158,8 @@ export function createInterface<Data extends object = any, Base extends object =
 
                 // handle possible return values
                 if (result0 && typeof result0 === 'object') { // que continues ...
-                    if ((<any>result0)[detachObjectSymbol]) { // do not merge
-                        delete (<any>result0)[detachObjectSymbol];
+                    if ((<any>result0)[detachedObjectSymbol]) { // do not merge
+                        delete (<any>result0)[detachedObjectSymbol];
                         self.data = result0;
                     } else { // please merge
                         assign(self.data, result0);

@@ -8,7 +8,7 @@ import { HandlerError } from './handler-error';
 export { HandlerError };
 declare const internalsSymbol: unique symbol;
 export declare const symbols: {
-    detachObject: symbol;
+    detachedObject: symbol;
     internals: symbol;
 };
 export declare type Handler<ThisArg, Data> = {

@@ -84,24 +84,19 @@ export declare function createWithContext<Data extends object = any, Base extend
  */
 export declare function series<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
 /**
- * Splits data into multiple queues.
- *
- * For each input function, the que is cloned, the function is prepended.
+ * Creates multiple branches from the data objects, each branch starting with one of the input function prepended.
  */
 export declare function branch<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
 /**
  * Executes all handlers simultaneously on the data.
  * The goal here is to speed up tasks that can work well asynchronously, like database or HTTP requests.
  *
- * Each handler works at the same time on the same dataset, so:\
  * __Use with caution!__
  *
- * - If any handler returns `false`, the que terminates without result; no other rule apply below.
- * - If any handler returns `true`, the que stops and returns the data, including
- *   all modifications of this step (other handler results will be merged).
- * - If any handler returns array, the first element will be used, the rest is dropped, to avoid too much complexity.
- * - `.rebase(data)` calls have unpredictable results; do not use.
- * - `.detached(data)` calls have unpredictable results; do not use.
- * - `branch(handlers)` function have unpredictable results; do not use.
-  */
+ * Handlers are started parallel but their results are processed in series
+ * (the same way as `series()` would do).
+ *
+ * Avoid `.rebase(data)` calls in a parallel handler; it could have unpredictable
+ * results if more than one handler tries to rebase.
+ */
 export declare function parallel<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;

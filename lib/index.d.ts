@@ -62,6 +62,7 @@ export declare function createInterface<Data extends object = any, Base extends 
  */
 export declare function create<Data extends object = any>(handler: Handler<Api<{}, Data>, Data>): {
     (data: DataArg<Data>): Promise<Data[]>;
+    stream(data: DataArg<Data>): Readable;
 };
 /**
  * Helper method to assign custom values to the `this` arg of queued handlers.
@@ -84,6 +85,7 @@ export declare function create<Data extends object = any>(handler: Handler<Api<{
  */
 export declare function createWithContext<Data extends object = any, Base extends object = {}>(thisArg: Base, handler: Handler<Api<Base, Data>, Data>): {
     (data: DataArg<Data>): Promise<Data[]>;
+    stream(data: DataArg<Data>): Readable;
 };
 /**
  * Queue handler functions and execute them in series.

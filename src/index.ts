@@ -211,8 +211,11 @@ export function createInterface<Data extends object = any, Base extends object =
  */
 export function create<Data extends object = any>(
     handler: Handler<Api<{}, Data>, Data>
-): { (data: DataArg<Data>): Promise<Data[]> } {
-    return async function (data: DataArg<Data>) {
+): {
+    (data: DataArg<Data>): Promise<Data[]>;
+    stream(data: DataArg<Data>): Readable;
+} {
+    const fn = async function (data: DataArg<Data>) {
         const results: Data[] = [];
         const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
         for await (const d of forAwaitOfIterableData) {
@@ -224,7 +227,48 @@ export function create<Data extends object = any>(
             Array.prototype.push.apply(results, queResults);
         }
         return results;
-    }
+    } as HandlerComposition<{}, Data>;
+    
+    fn.stream = function (data: DataArg<Data>): Readable {
+        let iterator: Iterator<Data> | AsyncIterator<Data>;
+        if (isIterable(data)) {
+            iterator = data[Symbol.iterator]();
+        } else if (isAsyncIterable(data)) {
+            iterator = data[Symbol.asyncIterator]();
+        } else {
+            iterator = [data][Symbol.iterator]();
+        }
+
+        return new Readable({
+            objectMode: true,
+            async read() {
+                while (true) {
+                    const it = await iterator.next();
+
+                    if (it.done) {
+                        this.push(null);
+                        break;
+                    } else {
+                        if (!isObject(it.value)) {
+                            throw new Error(`Only object inputs are allowed, got '${getType(it.value)}'.`);
+                        }
+
+                        const que = createInterface(clone(it.value), [handler]);
+                        const queResults = await que.consume();
+
+                        if (queResults.length > 0) {
+                            for (const r of queResults) {
+                                this.push(r);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    return fn;
 }
 
 /**
@@ -249,8 +293,11 @@ export function create<Data extends object = any>(
 export function createWithContext<Data extends object = any, Base extends object = {}>(
     thisArg: Base,
     handler: Handler<Api<Base, Data>, Data>
-): { (data: DataArg<Data>): Promise<Data[]> } {
-    return async function (data: DataArg<Data>) {
+): {
+    (data: DataArg<Data>): Promise<Data[]>;
+    stream(data: DataArg<Data>): Readable;
+} {
+    const fn = async function (data: DataArg<Data>) {
         const results: Data[] = [];
         const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
         for await (const d of forAwaitOfIterableData) {
@@ -262,7 +309,48 @@ export function createWithContext<Data extends object = any, Base extends object
             Array.prototype.push.apply(results, queResults);
         }
         return results;
-    }
+    } as HandlerComposition<Base, Data>;
+    
+    fn.stream = function (data: DataArg<Data>): Readable {
+        let iterator: Iterator<Data> | AsyncIterator<Data>;
+        if (isIterable(data)) {
+            iterator = data[Symbol.iterator]();
+        } else if (isAsyncIterable(data)) {
+            iterator = data[Symbol.asyncIterator]();
+        } else {
+            iterator = [data][Symbol.iterator]();
+        }
+
+        return new Readable({
+            objectMode: true,
+            async read() {
+                while (true) {
+                    const it = await iterator.next();
+
+                    if (it.done) {
+                        this.push(null);
+                        break;
+                    } else {
+                        if (!isObject(it.value)) {
+                            throw new Error(`Only object inputs are allowed, got '${getType(it.value)}'.`);
+                        }
+
+                        const que = createInterface(clone(it.value), [handler], thisArg);
+                        const queResults = await que.consume();
+
+                        if (queResults.length > 0) {
+                            for (const r of queResults) {
+                                this.push(r);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    return fn;
 }
 
 

@@ -4,6 +4,8 @@
  * Copyright (c) 2021, László BULIK.
  * Released under the MPL-2.0 License.
  */
+/// <reference types="node" />
+import { Readable } from 'stream';
 import { HandlerError } from './handler-error';
 export { HandlerError };
 declare const internalsSymbol: unique symbol;
@@ -17,6 +19,10 @@ export declare type Handler<ThisArg, Data> = {
 declare type HandlerResult<Data> = void | undefined | null | boolean | Data | Promise<void | undefined | null | boolean | Data> | (void | undefined | null | boolean | Data | Promise<void | undefined | null | boolean | Data>)[];
 declare type HandlerArg<ThisArg, Data> = Handler<ThisArg, Data> | Iterable<Handler<ThisArg, Data>>;
 declare type DataArg<Data> = Data | Iterable<Data> | AsyncIterable<Data>;
+declare type HandlerComposition<Base, Data> = {
+    (this: Api<Base, Data> | void, data: DataArg<Data>): Promise<Data[]>;
+    stream(data: DataArg<Data>): Readable;
+};
 declare type BranchApi<Base, Data> = {
     api: Api<Base, Data>;
     que: Handler<Api<Base, Data>, Data>[];
@@ -82,11 +88,11 @@ export declare function createWithContext<Data extends object = any, Base extend
 /**
  * Queue handler functions and execute them in series.
  */
-export declare function series<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
+export declare function series<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): HandlerComposition<Base, Data>;
 /**
  * Creates multiple branches from the data objects, each branch starting with one of the input function prepended.
  */
-export declare function branch<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
+export declare function branch<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): HandlerComposition<Base, Data>;
 /**
  * Executes all handlers simultaneously on the data.
  * The goal here is to speed up tasks that can work well asynchronously, like database or HTTP requests.
@@ -99,4 +105,4 @@ export declare function branch<Data extends object = any, Base extends object = 
  * Avoid `.rebase(data)` calls in a parallel handler; it could have unpredictable
  * results if more than one handler tries to rebase.
  */
-export declare function parallel<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
+export declare function parallel<Data extends object = any, Base extends object = {}>(...args: HandlerArg<Api<Base, Data>, Data>[]): HandlerComposition<Base, Data>;

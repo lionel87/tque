@@ -18,7 +18,7 @@ You want to control the list of called functions for each data object.
 
    Here `T` is now a callable function which can have one input parameter (the input data) with a type of `object`, `Iterable<object>` or `AsyncIterable<object>` (incl. object streams).
 
-   *`series()` will call the transform functions in series; but there are also a `parallel()` helper where functions executed simultaneously and a `branch()` helper which creates multiple branches, each branch starting with one of its input function.*
+   *`series()` will call the transform functions in series; but there are also a `parallel()` helper where functions executed simultaneously and a `branch()` helper which creates multiple branches, each branch starting with one of the input function.*
 
 2. Start the transformations by calling the `T(data)` template.
 

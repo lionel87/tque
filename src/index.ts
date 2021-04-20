@@ -5,17 +5,18 @@
  * Released under the MPL-2.0 License.
  */
 
+import { Readable } from 'stream';
 import assign from 'assign-deep';
 import clone from 'clone-deep';
 
 import { HandlerError } from './handler-error';
 export { HandlerError };
 
-const detachObjectSymbol = Symbol('__detachObjectMode');
+const detachedObjectSymbol = Symbol('__detachedObjectMode');
 const internalsSymbol = Symbol('__internals');
 
 export const symbols = {
-    detachObject: detachObjectSymbol,
+    detachedObject: detachedObjectSymbol,
     internals: internalsSymbol,
 };
 
@@ -25,6 +26,18 @@ type HandlerResult<Data> = void | undefined | null | boolean | Data | Promise<vo
 
 type HandlerArg<ThisArg, Data> = Handler<ThisArg, Data> | Iterable<Handler<ThisArg, Data>>;
 type DataArg<Data> = Data | Iterable<Data> | AsyncIterable<Data>;
+
+type HandlerComposition<Base, Data> = {
+    (this: Api<Base, Data> | void, data: DataArg<Data>): Promise<Data[]>;
+    stream(data: DataArg<Data>): Readable;
+};
+
+// series(), branch(), parallel() returns void if called by other series(), branch(), parallel()
+// this is an internal-ish behaviour, so we shadow the undefined return value
+type InternalHandlerComposition<Base, Data> = {
+    (this: Api<Base, Data> | void, data: DataArg<Data>): Promise<Data[] | undefined>;
+    stream(data: DataArg<Data>): Readable;
+};
 
 type BranchApi<Base, Data> = {
     api: Api<Base, Data>;
@@ -100,7 +113,7 @@ export function createInterface<Data extends object = any, Base extends object =
             self.data = data;
         },
         detached(data: Data): Data {
-            (<any>data)[detachObjectSymbol] = true;
+            (<any>data)[detachedObjectSymbol] = true;
             return data;
         }
     }, <Base>(base || {}));
@@ -139,8 +152,8 @@ export function createInterface<Data extends object = any, Base extends object =
                     if (result !== false) { // if not exiting
                         if (result !== true) {
                             if (result && typeof result === 'object') { // object
-                                if ((<any>result)[detachObjectSymbol]) { // do not merge
-                                    delete (<any>result)[detachObjectSymbol];
+                                if ((<any>result)[detachedObjectSymbol]) { // do not merge
+                                    delete (<any>result)[detachedObjectSymbol];
                                     self.branch(result);
                                 } else { // please merge
                                     self.branch(assign(clone(self.data), result));
@@ -158,8 +171,8 @@ export function createInterface<Data extends object = any, Base extends object =
 
                 // handle possible return values
                 if (result0 && typeof result0 === 'object') { // que continues ...
-                    if ((<any>result0)[detachObjectSymbol]) { // do not merge
-                        delete (<any>result0)[detachObjectSymbol];
+                    if ((<any>result0)[detachedObjectSymbol]) { // do not merge
+                        delete (<any>result0)[detachedObjectSymbol];
                         self.data = result0;
                     } else { // please merge
                         assign(self.data, result0);
@@ -198,8 +211,11 @@ export function createInterface<Data extends object = any, Base extends object =
  */
 export function create<Data extends object = any>(
     handler: Handler<Api<{}, Data>, Data>
-): { (data: DataArg<Data>): Promise<Data[]> } {
-    return async function (data: DataArg<Data>) {
+): {
+    (data: DataArg<Data>): Promise<Data[]>;
+    stream(data: DataArg<Data>): Readable;
+} {
+    const fn = async function (data: DataArg<Data>) {
         const results: Data[] = [];
         const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
         for await (const d of forAwaitOfIterableData) {
@@ -211,7 +227,48 @@ export function create<Data extends object = any>(
             Array.prototype.push.apply(results, queResults);
         }
         return results;
-    }
+    } as HandlerComposition<{}, Data>;
+    
+    fn.stream = function (data: DataArg<Data>): Readable {
+        let iterator: Iterator<Data> | AsyncIterator<Data>;
+        if (isIterable(data)) {
+            iterator = data[Symbol.iterator]();
+        } else if (isAsyncIterable(data)) {
+            iterator = data[Symbol.asyncIterator]();
+        } else {
+            iterator = [data][Symbol.iterator]();
+        }
+
+        return new Readable({
+            objectMode: true,
+            async read() {
+                while (true) {
+                    const it = await iterator.next();
+
+                    if (it.done) {
+                        this.push(null);
+                        break;
+                    } else {
+                        if (!isObject(it.value)) {
+                            throw new Error(`Only object inputs are allowed, got '${getType(it.value)}'.`);
+                        }
+
+                        const que = createInterface(clone(it.value), [handler]);
+                        const queResults = await que.consume();
+
+                        if (queResults.length > 0) {
+                            for (const r of queResults) {
+                                this.push(r);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    return fn;
 }
 
 /**
@@ -236,8 +293,11 @@ export function create<Data extends object = any>(
 export function createWithContext<Data extends object = any, Base extends object = {}>(
     thisArg: Base,
     handler: Handler<Api<Base, Data>, Data>
-): { (data: DataArg<Data>): Promise<Data[]> } {
-    return async function (data: DataArg<Data>) {
+): {
+    (data: DataArg<Data>): Promise<Data[]>;
+    stream(data: DataArg<Data>): Readable;
+} {
+    const fn = async function (data: DataArg<Data>) {
         const results: Data[] = [];
         const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
         for await (const d of forAwaitOfIterableData) {
@@ -249,20 +309,63 @@ export function createWithContext<Data extends object = any, Base extends object
             Array.prototype.push.apply(results, queResults);
         }
         return results;
-    }
+    } as HandlerComposition<Base, Data>;
+    
+    fn.stream = function (data: DataArg<Data>): Readable {
+        let iterator: Iterator<Data> | AsyncIterator<Data>;
+        if (isIterable(data)) {
+            iterator = data[Symbol.iterator]();
+        } else if (isAsyncIterable(data)) {
+            iterator = data[Symbol.asyncIterator]();
+        } else {
+            iterator = [data][Symbol.iterator]();
+        }
+
+        return new Readable({
+            objectMode: true,
+            async read() {
+                while (true) {
+                    const it = await iterator.next();
+
+                    if (it.done) {
+                        this.push(null);
+                        break;
+                    } else {
+                        if (!isObject(it.value)) {
+                            throw new Error(`Only object inputs are allowed, got '${getType(it.value)}'.`);
+                        }
+
+                        const que = createInterface(clone(it.value), [handler], thisArg);
+                        const queResults = await que.consume();
+
+                        if (queResults.length > 0) {
+                            for (const r of queResults) {
+                                this.push(r);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    return fn;
 }
+
 
 /**
  * Queue handler functions and execute them in series.
  */
 export function series<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]
-): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
+): HandlerComposition<Base, Data>;
+
 export function series<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]
-): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[] | undefined> {
+) {
     const handlers = flattenHandlers(args);
-    return async function (data) {
+    const fn = async function (data) {
         if (isApi<Base, Data>(this)) {
             // (A): called as part of an existing que.
             // use the existing branch to que up hanlers. do not return any result.
@@ -282,22 +385,61 @@ export function series<Data extends object = any, Base extends object = {}>(
             }
             return results;
         }
-    }
+    } as InternalHandlerComposition<Base, Data>;
+
+    fn.stream = function (data: DataArg<Data>): Readable {
+        let iterator: Iterator<Data> | AsyncIterator<Data>;
+        if (isIterable(data)) {
+            iterator = data[Symbol.iterator]();
+        } else if (isAsyncIterable(data)) {
+            iterator = data[Symbol.asyncIterator]();
+        } else {
+            iterator = [data][Symbol.iterator]();
+        }
+
+        return new Readable({
+            objectMode: true,
+            async read() {
+                while (true) {
+                    const it = await iterator.next();
+
+                    if (it.done) {
+                        this.push(null);
+                        break;
+                    } else {
+                        if (!isObject(it.value)) {
+                            throw new Error(`Only object inputs are allowed, got '${getType(it.value)}'.`);
+                        }
+
+                        const que = createInterface(clone(it.value), [...handlers]);
+                        const queResults = await que.consume();
+
+                        if (queResults.length > 0) {
+                            for (const r of queResults) {
+                                this.push(r);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    return fn;
 }
 
 /**
- * Splits data into multiple queues.
- *
- * For each input function, the que is cloned, the function is prepended.
+ * Creates multiple branches from the data objects, each branch starting with one of the input function prepended.
  */
 export function branch<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]
-): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
+): HandlerComposition<Base, Data>;
 export function branch<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]
-): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[] | undefined> {
+): InternalHandlerComposition<Base, Data> {
     const handlers = flattenHandlers(args);
-    return async function (data) {
+    const fn = async function (data) {
         if (isApi<Base, Data>(this)) {
             for (let i = 1; i < handlers.length; i++) {
                 const handler = handlers[i];
@@ -321,69 +463,90 @@ export function branch<Data extends object = any, Base extends object = {}>(
             }
             return results;
         }
-    }
+    } as InternalHandlerComposition<Base, Data>;
+
+    fn.stream = function (data: DataArg<Data>): Readable {
+        let iterator: Iterator<Data> | AsyncIterator<Data>;
+        if (isIterable(data)) {
+            iterator = data[Symbol.iterator]();
+        } else if (isAsyncIterable(data)) {
+            iterator = data[Symbol.asyncIterator]();
+        } else {
+            iterator = [data][Symbol.iterator]();
+        }
+
+        return new Readable({
+            objectMode: true,
+            async read() {
+                while (true) {
+                    const it = await iterator.next();
+
+                    if (it.done) {
+                        this.push(null);
+                        break;
+                    } else {
+                        if (!isObject(it.value)) {
+                            throw new Error(`Only object inputs are allowed, got '${getType(it.value)}'.`);
+                        }
+
+                        const results: Data[] = [];
+                        for (const handler of handlers) {
+                            const que = createInterface(clone(it.value), [handler]);
+                            const queResults = await que.consume();
+                            Array.prototype.push.apply(results, queResults);
+                        }
+
+                        if (results.length > 0) {
+                            for (const r of results) {
+                                this.push(r);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    return fn;
 }
 
 /**
  * Executes all handlers simultaneously on the data.
  * The goal here is to speed up tasks that can work well asynchronously, like database or HTTP requests.
  *
- * Each handler works at the same time on the same dataset, so:\
  * __Use with caution!__
  *
- * - If any handler returns `false`, the que terminates without result; no other rule apply below.
- * - If any handler returns `true`, the que stops and returns the data, including
- *   all modifications of this step (other handler results will be merged).
- * - If any handler returns array, the first element will be used, the rest is dropped, to avoid too much complexity.
- * - `.rebase(data)` calls have unpredictable results; do not use.
- * - `.detached(data)` calls have unpredictable results; do not use.
- * - `branch(handlers)` function have unpredictable results; do not use.
-  */
+ * Handlers are started parallel but their results are processed in series
+ * (the same way as `series()` would do).
+ *
+ * Avoid `.rebase(data)` calls in a parallel handler; it could have unpredictable
+ * results if more than one handler tries to rebase.
+ */
 export function parallel<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]
-): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[]>;
+): HandlerComposition<Base, Data>;
 export function parallel<Data extends object = any, Base extends object = {}>(
     ...args: HandlerArg<Api<Base, Data>, Data>[]
-): (this: Api<Base, Data> | void, data: DataArg<Data>) => Promise<Data[] | undefined | boolean> {
+): InternalHandlerComposition<Base, Data> {
     const handlers = flattenHandlers(args);
-    return async function (data) {
+    const fn = async function (data) {
         if (isApi<Base, Data>(this)) {
             const api = this;
             const internals = api[internalsSymbol];
 
-            let handlerResults: HandlerResult<Data>[];
+            let pendingHandlerCallbacks: Handler<Api<Base, Data>, Data>[];
             try {
-                handlerResults = await Promise.all(handlers.map(handler => handler.call(api, internals.data)));
-            } catch (error) { 
+                pendingHandlerCallbacks = handlers
+                    .map(handler => {
+                        const pendingHandler = handler.call(api, internals.data);
+                        return () => pendingHandler;
+                    });
+            } catch (error) {
                 throw new HandlerError(error, internals.data);
             }
 
-            if (handlerResults.some(r => r === false || (Array.isArray(r) && r.some(r => r === false)))) { // if the que exits, prevent heavy work early
-                return false;
-            }
-
-            let endThisQue = false;
-            for (let handlerResult of handlerResults) {
-                if (!Array.isArray(handlerResult)) {
-                    handlerResult = [handlerResult];
-                }
-                const handerResult0 = await handlerResult.shift();
-                if (handerResult0 !== true) {
-                    if (handerResult0 && typeof handerResult0 === 'object') { // object
-                        if ((<any>handerResult0)[detachObjectSymbol]) { // do not merge
-                            internals.data = handerResult0;
-                        } else { // please merge
-                            assign(internals.data, handerResult0);
-                        }
-                    }
-                } else {
-                    endThisQue = true;
-                }
-            }
-
-            if (endThisQue) {
-                return true;
-            }
+            this.next(pendingHandlerCallbacks);
         } else {
             const results: Data[] = [];
             const forAwaitOfIterableData = isIterable(data) || isAsyncIterable(data) ? data : [data];
@@ -393,45 +556,81 @@ export function parallel<Data extends object = any, Base extends object = {}>(
                 }
 
                 const internals = createInterface<Data, Base>(clone(d), []);
+                const api = internals.api;
 
-                let handlerResults: HandlerResult<Data>[];
+                let pendingHandlerCallbacks: Handler<Api<Base, Data>, Data>[];
                 try {
-                    handlerResults = await Promise.all(handlers.map(handler => handler.call(internals.api, internals.data)));
-                } catch (error) { 
+                    pendingHandlerCallbacks = handlers
+                        .map(handler => {
+                            const pendingHandler = handler.call(api, internals.data);
+                            return () => pendingHandler;
+                        });
+                } catch (error) {
                     throw new HandlerError(error, internals.data);
                 }
 
-                if (handlerResults.some(r => r === false || (Array.isArray(r) && r.some(r => r === false)))) { // if the que exits, prevent heavy work early
-                    break;
-                }
+                api.next(pendingHandlerCallbacks);
 
-                let endThisQue = false;
-                for (let handlerResult of handlerResults) {
-                    if (!Array.isArray(handlerResult)) {
-                        handlerResult = [handlerResult];
-                    }
-                    const handerResult0 = await handlerResult.shift();
-                    if (handerResult0 !== true) {
-                        if (handerResult0 && typeof handerResult0 === 'object') { // object
-                            if ((<any>handerResult0)[detachObjectSymbol]) { // do not merge
-                                internals.data = handerResult0;
-                            } else { // please merge
-                                assign(internals.data, handerResult0);
-                            }
-                        }
-                    } else {
-                        endThisQue = true;
-                    }
-                }
-
-                if (endThisQue) {
-                    results.push(internals.data);
-                } else {
-                    const queResults = await internals.consume();
-                    Array.prototype.push.apply(results, queResults);
-                }
+                const queResults = await internals.consume();
+                Array.prototype.push.apply(results, queResults);
             }
             return results;
         }
-    }
+    } as InternalHandlerComposition<Base, Data>;
+
+    fn.stream = function (data: DataArg<Data>): Readable {
+        let iterator: Iterator<Data> | AsyncIterator<Data>;
+        if (isIterable(data)) {
+            iterator = data[Symbol.iterator]();
+        } else if (isAsyncIterable(data)) {
+            iterator = data[Symbol.asyncIterator]();
+        } else {
+            iterator = [data][Symbol.iterator]();
+        }
+
+        return new Readable({
+            objectMode: true,
+            async read() {
+                while (true) {
+                    const it = await iterator.next();
+
+                    if (it.done) {
+                        this.push(null);
+                        break;
+                    } else {
+                        if (!isObject(it.value)) {
+                            throw new Error(`Only object inputs are allowed, got '${getType(it.value)}'.`);
+                        }
+
+                        const internals = createInterface<Data, Base>(clone(it.value), []);
+                        const api = internals.api;
+
+                        let pendingHandlerCallbacks: Handler<Api<Base, Data>, Data>[];
+                        try {
+                            pendingHandlerCallbacks = handlers
+                                .map(handler => {
+                                    const pendingHandler = handler.call(api, internals.data);
+                                    return () => pendingHandler;
+                                });
+                        } catch (error) {
+                            throw new HandlerError(error, internals.data);
+                        }
+
+                        api.next(pendingHandlerCallbacks);
+
+                        const queResults = await internals.consume();
+
+                        if (queResults.length > 0) {
+                            for (const r of queResults) {
+                                this.push(r);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    return fn;
 }

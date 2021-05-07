@@ -12,13 +12,8 @@ import clone from 'clone-deep';
 import { HandlerError } from './handler-error';
 export { HandlerError };
 
-const detachedObjectSymbol = Symbol('__detachedObjectMode');
-const internalsSymbol = Symbol('__internals');
-
-export const symbols = {
-    detachedObject: detachedObjectSymbol,
-    internals: internalsSymbol,
-};
+export const detachedObjectSymbol = Symbol('__detachedObjectMode');
+export const internalsSymbol = Symbol('__internals');
 
 export type Handler<ThisArg, Data> = { (this: ThisArg, data: Data): HandlerResult<Data> | Promise<HandlerResult<Data>> };
 type HandlerResult<Data> = void | undefined | null | boolean | Data | Promise<void | undefined | null | boolean | Data> |
